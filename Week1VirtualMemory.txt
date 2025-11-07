@@ -1,0 +1,48 @@
+										Virtual memory
+1.
+- eachprogram has its own virtual memory space
+-physical memory usually means ram
+-virtual and physical memory is split into 4kib chunks called pages
+-last 12 bits (for 4kiB pages) are called offset
+-remaining bits are called virtual and physical page numbers
+-page number maps vpn to ppn
+-one page table per program
+-page fault is an exception that is raised when corresponding data is not in RAM
+
+*when you install a program, the sintally simply copies files like exe, lib (.dll) and aseets on to the disk. NO memory is allocated yet
+*when you launch the program, memory is allocated.
+	windows creates a new process fro the program
+	the OS gives this process its own virtual address space (4gb for 32 bit system, 128TB for 64 bit system)
+*so at launch time, the progream gets a private, isolated view of the memory addresses, but most of those addresses dont point to real Ram yet
+*As the program runs,Windows reserves parts of the virtual address space, maps those virtual pages to physical RAM ON DEMAND. This is done by Memory Manager in windows kernel
+2. Demand paging
+
+Windows doesn’t load everything at once.
+Instead, it uses demand paging:
+
+When a program tries to access a virtual address for the first time, the OS checks if there’s a physical page mapped to it.
+
+If not, it finds a free frame in RAM and loads the needed data from disks (or zeroes out a new page).
+
+If RAM is full, Windows can swap unused pages to the page file on disk.
+
+That’s what allows your system to “pretend” it has more memory than physically available.
+
+3. The page file (virtual memory on disk)
+
+The page file (e.g., C:\pagefile.sys) acts like an overflow area for RAM.
+
+When RAM fills up, Windows moves the least-used memory pages to the page file.
+
+The program doesn’t notice — from its point of view, its memory is still there.
+
+Accessing swapped-out pages is slower, because the disk is much slower than RAM.
+
+So, the combination of RAM + page file supports the illusion of a much larger memory space 
+
+--> all in all, when a program is installed, only files are copied, no memory is involved, not physical, not virtual
+ - (At runtime)when thep program runs, windows create a process. This process is given its own virtual space by the OS and only certain things: exe code,dlls,stack,heap, sys lib
+ - (At execution)	Now, the exe file's machine code is loaded in to virtual memory (only on demand) -> the mapping of virtual and physical begins
+		Next, your progam executes, CPU fetches next instructions using its virtual addresses, MMU translates it to physical RAM location,
+			intructions are fetched into L1 instruction cache, CPU decodes and executes it, writes new data to L1 cache, then L1 cache flushes new data to RAM
+--> in essence, CPU reads initial instruction from virtual memory, allocate necessary memory in RAM, fetches data from cahce or Ram, write and stores in RAM

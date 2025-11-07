@@ -1,0 +1,93 @@
+1. when a program (from disk) is loaded in to ram and executed by the processor,
+it becomes a process
+
+2.each process has its own memory address space, one process cannot corrupt another
+
+3. Example: each chrome tab is an isolated process -> eats lots of ram
+
+4. a thread is a unit of execution within a process
+   a process has at least 1 thread called main thread
+   each thread has its own stack (stack, registers, program counters
+   threads within a process share a memory address space 
+   it is possible to communicate between thread using the shared space 
+   but it also means one misbehaving thread can bring down the whole process
+
+5. context switching is basically task switching to make full use of ram
+          thread switching is prioritizing certain threads over other,
+          then switching out unused threads, resuming threads
+          this is more cost efficient then switch process
+
+									Create a process
+1. when you click on notepad.exe
+- C:\Windows\notepad.exe is just a path string
+- when you double click it, the shell (Explorer.exe)builds a unicode_string with that path and the pointer like 0000000019d44b8c points to that string address in Explorer's Memory 
+			    the shell also calls ShellExecuteEx, then ShellExecuteEx uses a chain of Shell32 helper clasees to resolve file association
+			    then the unicode_string with the path of notepad.exe and the resolved file association are passed to CreateProcessW in kernel32.dll
+			    then CreateProcessW calls NtCreateUserProcess (NTDLL.dll)
+			    then NtCreateUserProcess executes a system call to switch to kernel mode
+			    then the kernel(Windows Executive) creates EPROCESS structure for the new process
+								creates its addess place (virtual memory)
+								loads the executable image into memory
+								sets up the initial thread(ETHREAD)
+								and finally Notepad runs independently, with its own virtual memory and system resources
+
+2. NtCreateUserProcess is the lowest-level native API for creating user-mode process 
+it is what everything ultimately calls underneath - CreateProcess, ShellExecuteEx, PowerShell's Start-Process....
+
+3. the idea of running as admin exists as CreateProcessAsUserW with an elevated token or ShellExecuteEx + runas
+
+CreateProcessW			Create a process under the current user token.
+CreateProcessAsUserW		Create a process using a different access token (used by services, RunAs, etc).
+CreateProcessWithTokenW / 	CreateProcessWithLogonW	Convenience functions to create elevated or alternate-credential processes.
+ShellExecuteEx + "runas" verb	The user-friendly, UAC-integrated way to create elevated processes. 
+
+
+ when CreateProcess is called, the OS will
+	
+| Step | Description                      | Structures Involved        |
+| ---- | -------------------------------- | -------------------------- |
+| 1    | CreateProcess sets up parameters | user mode (`kernel32.dll`) |
+| 2    | Create process object            | `EPROCESS`, `KPROCESS`     |
+| 3    | Create address space             | MM structures-->isolation  |
+| 4    | Map image into address space     | section object             |
+| 5    | Create and initialize PEB/TEB    | `PEB`, `TEB`               |
+| 6    | Create primary thread            | `ETHREAD`, `KTHREAD`       |
+| 7    | Dispatcher schedules the thread  | kernel scheduler           |
+
+a bit more detail:
+step 1: CreateProcess in kernel32.dll prepares parameters, resolves the executable path, environment, etc., and then calls into NtCreateUserProcess in ntdll.dll.
+
+This enters kernel mode, where the executive actually creates the process and thread objects.
+
+step 2: Inside the kernel, Windows creates a process object — that’s your EPROCESS structure.
+It also contains a KPROCESS structure (embedded inside EPROCESS) that represents the process to the kernel’s scheduler.
+
+step 4: The image file (the executable you passed to CreateProcess) is opened by the Object Manager, verified, and then mapped into the new address space by the Memory Manager.
+
+step 5: Windows creates the PEB (Process Environment Block) inside the process’s address space.
+This structure holds:
+
+Loader data (list of loaded modules).
+
+Command line and environment.
+
+Image base, heap pointer, etc.
+
+Then, for each thread, it creates a TEB (Thread Environment Block).
+
+
+
+4. a little tip
+| Concept    | Role                                                                 | Example                                         |
+| ---------- | -------------------------------------------------------------------- | ----------------------------------------------- |
+| **API**    | The *function call* you use to tell Windows to do something          | `CreateProcess`, `CreateFile`, `CreateEvent`    |
+| **Handle** | The *reference* (returned by an API) that represents a kernel object | `HANDLE hProcess` returned from `CreateProcess` |
+| **IPC**    | Mechanisms that let *different processes* talk or share resources    | Named pipes, shared memory, sockets, etc.       |
+
+
+| Concept    | Analogy                                                                                                                |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------- |
+| **API**    | The *menu* or *ordering counter* where you tell the chef what to cook.                                                 |
+| **Handle** | The *ticket number* or *order ID* the chef gives you so you can refer to your dish later (“Order #23 — File handle!”). |
+| **IPC**    | When *two customers* exchange notes or share ingredients between their tables — with the restaurant’s permission.      |
+

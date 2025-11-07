@@ -1,0 +1,33 @@
+1. What APIS do
+- like any other functions:
+	change data structures
+	read,write,modify,delete
+	control, read or write to devices
+	implement some algorithms/logic
+
+2. example of using apis to call notepad
+- when you write a C++ program to use win apis to open notepad.exe
+	+ you pass higher-level parameters to the OS
+	+ these parameters are used by the OS to build PEB
+		 PEB has a fixed data structure
+		 When CreateProcess alls down to NTCreateUSerProcess, the kernel:
+			allocates a new process object (Eprocess)
+			creates a new address space
+			map the exe image into memory
+			allocates memory for a PEB and fills it with
+				image base address
+				loader data
+				process parameters (passed from args)
+				default head point,....
+	+ then the OS allocates a TEB (thread environment block)
+	+ sets up the initial thread stack and cpu context
+
+
+| **Cooking analogy**                                                                                                                 | **What happens in Windows**                                                                                                                   |
+| ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| 🧾 **You (the caller) list the ingredients** — you say *what dish you want* and *what ingredients to use* (e.g., flour, salt, oil). | You call **`CreateProcess`** and pass arguments — the **path to the EXE**, **command line**, **environment variables**, and **startup info**. |
+| 👨‍🍳 **The chef** knows the **recipe** — he knows the sequence of steps to prepare that dish.                                      | The **Windows kernel + loader (NTDLL)** have a **fixed recipe** — the sequence of internal steps for process creation and initialization.     |
+| 🍲 **The chef takes a new pot** — clean, isolated, ready to use.                                                                    | The OS **creates a new address space** — an empty, isolated memory map (this is your “new pot”).                                              |
+| 🔥 **He puts the pot on the stove** — assigns it to a burner to be cooked.                                                          | The kernel **registers the process and thread** with the scheduler — gives them CPU time and system resources.                                |
+| 🥕 **He fills the pot with ingredients** — using your ingredient list.                                                              | The kernel + NTDLL **fill the new process’s memory** (PEB, parameters, environment, loaded image) using your inputs.                          |
+| 🧑‍🍳 **The chef starts cooking** — begins the cooking process.                                                                     | The **primary thread starts executing**, running the process’s startup code (like `_NtProcessStartup → mainCRTStartup → main`).               |

@@ -1,0 +1,273 @@
+										KERNEL INTERNALS
+# 1 — Access Tokens, Integrity Levels, UAC internals
+
+## What an Access Token is
+
+* An **access token** is the kernel object that represents the security context of a process or thread:
+
+  * Who the user is (SID(s))
+  * Group SIDs and attributes
+  * Privileges (SeDebugPrivilege, SeTakeOwnershipPrivilege, etc.)
+  * Default DACL, session ID, logon SID, authentication ID
+* Tokens are attached to processes and threads. The kernel uses a token + object security descriptor + access mask to make access decisions.
+
+### Common token-related types/APIs (user-mode)
+
+* `OpenProcessToken`, `OpenThreadToken`
+* `GetTokenInformation` / `SetTokenInformation`
+
+  * `TokenUser`, `TokenGroups`, `TokenPrivileges`, `TokenIntegrityLevel`, `TokenElevation`, `TokenType`
+* `DuplicateTokenEx`, `CreateRestrictedToken`, `AdjustTokenPrivileges`
+* `ImpersonateLoggedOnUser`, `RevertToSelf`
+
+### Inspecting tokens (safe)
+
+* PowerShell to list token elevation / owner:
+
+```powershell
+# Check if current process is elevated
+(Get-Process -Id $PID).StartInfo.EnvironmentVariables["USERNAME"] # example inspect
+# Recommend using API via C#/C++ or tools instead: Process Explorer shows 'Integrity' and 'Elevated' columns.
+```
+
+* WinDbg: inspect process `EPROCESS` and token pointer:
+
+```
+!process 0 0 <pid>         ; shows process; token pointer
+!token <tokenaddr>         ; show token contents (if extension available)
+```
+
+### Integrity Levels
+
+* Introduced with Mandatory Integrity Control (MIC). SIDs like `S-1-16-0` (Low), `S-1-16-4096` (Medium), `S-1-16-8192` (High), `S-1-16-12288` (System).
+* Integrity level is a claim inside a token that the kernel enforces for certain operations (e.g., clipboard access, file writes under protected folders).
+* Query in user-mode:
+
+```cpp
+HANDLE hToken;
+GetTokenInformation(hToken, TokenIntegrityLevel, ...);
+```
+
+### UAC internals (very high-level)
+
+* UAC (User Account Control) is a combined UI/model and token model:
+
+  * Admin accounts get a filtered (split) token for regular processes (Medium) and an elevated token (High) for consent prompts.
+  * Elevation occurs via the **Secure Desktop** Consent UI or via auto-elevation for signed Microsoft binaries.
+* Key mechanisms:
+
+  * `CreateProcessAsUser` with elevated token
+  * `COMElevationMoniker`, `ShellExecute` with `runas`
+  * Virtualization (legacy) — filesystem/registry redirection for legacy apps (less relevant on modern Windows)
+* Detection: `TokenElevation` and `TokenElevationType` via `GetTokenInformation`.
+
+### Practical user-mode exercise (safe)
+
+* Build a small utility (C++ or C#) that enumerates processes and prints:
+
+  * PID, image name, user SID, integrity level, token privileges, token elevation.
+* This reinforces tokens, integrity levels, and UAC concepts without touching kernel internals.
+
+---
+
+# 2 — LSASS, SAM, WinLogon, Kerberos, DPAPI
+
+I’ll cover each service/component: role, storage, relevant APIs, and safe detection/monitoring ideas.
+
+## LSASS (Local Security Authority Subsystem Service)
+
+* **Role**: LSASS (`lsass.exe`) enforces local security policies, performs authentication, manages the LSA (Local Security Authority) subsystem, and holds secrets (authentication tokens/tickets, sometimes cached credentials).
+* **What it does**:
+
+  * Processes interactive logons and network authentication.
+  * Interacts with authentication packages (Kerberos, NTLM).
+  * Hosts LSA Private Data (LSA Secrets) and the LSA policy.
+* **Security relevance**:
+
+  * High-value target — attackers attempt to read LSASS memory to extract credentials & tickets.
+* **Safe monitoring**:
+
+  * Watch for processes opening LSASS with high access (`PROCESS_VM_READ`, `PROCESS_DUP_HANDLE`, `PROCESS_QUERY_INFORMATION`).
+  * Use Process Explorer to view handles and permission requests.
+  * Enable and monitor **Lsa Protection** features (LSA Protection, Credential Guard) where available.
+* **APIs/concepts**: `LsaRegisterLogonProcess`, `LsaLogonUser`, `LsaLookupAuthenticationPackage`.
+
+## SAM (Security Account Manager)
+
+* **Role**: SAM database contains local user accounts and hashed credentials for local accounts (in standalone or domain-joined scenarios, domain credentials are in AD).
+* **Storage**:
+
+  * On disk: SAM is stored in registry hive `HKLM\SAM` but locked; accessible when offline (e.g., from an image).
+  * In-memory: LSASS may load or access SAM info during authentication.
+* **Safe inspection**:
+
+  * Query user list using `net user` or `Get-LocalUser` (PowerShell) — do **not** attempt to extract hashes on live systems.
+  * For research, use an offline copy of the SAM hive extracted from a VM snapshot.
+
+## WinLogon
+
+* **Role**: `winlogon.exe` manages interactive logon sessions, the secure attention sequence (Ctrl+Alt+Del), loading user profiles, and starting user shell (explorer.exe).
+* **Components**:
+
+  * Credential Providers (modern replacement for GINA) present UI to obtain credentials.
+  * Winlogon calls into `LSASS` for authentication.
+* **Monitoring**:
+
+  * Log interactive logons, session changes (WTS events), and credential provider anomalies (rare).
+  * Event IDs: Windows Security log contains logon events (4624, 4625, etc.).
+
+## Kerberos (high-level)
+
+* **Role**: Kerberos is the default domain authentication protocol on Active Directory environments.
+* **Flow (simplified)**:
+
+  1. Client authenticates to KDC (AS exchange) and receives TGT (Ticket Granting Ticket).
+  2. Client requests service tickets (TGS exchange) from KDC for services.
+  3. Tickets presented to services for access.
+* **Key artifacts**:
+
+  * TGTs and service tickets in memory (LSASS) and in logon sessions.
+  * Kerberos-specific events (e.g., TGT renewals, failed ticket requests) in Security Event logs.
+* **Monitoring**:
+
+  * Look for unusual ticket requests, ticket lifetimes, unusual account use patterns.
+  * Tools: `klist` lists tickets for the current account.
+
+## DPAPI (Data Protection API)
+
+* **Role**: DPAPI (`CryptProtectData` / `CryptUnprotectData`) provides easy symmetric encryption of application secrets bound to a user or machine account.
+* **How it works (overview)**:
+
+  * DPAPI derives encryption keys from user credentials (logon secrets) and stores encrypted master keys in `%APPDATA%\Microsoft\Protect\<SID>\`.
+  * On decrypt, DPAPI uses the user logon credentials to derive a key to unwrap the master key; machine master keys are stored for machine-level protection.
+* **Usage**:
+
+  * Many user secrets (saved Wi-Fi keys, saved credentials, browser-stored credentials, etc.) may be protected with DPAPI.
+* **Monitoring/protection**:
+
+  * Keep LSASS protected (Credential Guard) and avoid storing sensitive DPAPI blobs where they can be trivially recovered from disk.
+* **APIs**:
+
+  * `CryptProtectData`, `CryptUnprotectData` (user-mode)
+  * DPAPI backs up keys via `dpapimig`/backup options for enterprise.
+
+---
+
+# 3 — Windows Security Reference Monitor (SRM)
+
+## What SRM is
+
+* The **Security Reference Monitor (SRM)** is the kernel component that enforces Windows security policies — it performs access checks when processes attempt to access securable objects.
+* Responsibilities:
+
+  * Enforce ACLs on objects created by Object Manager (files, registry keys, processes, threads, tokens, devices).
+  * Evaluate tokens vs. security descriptors using `SeAccessCheck`.
+  * Track audit policy & actions.
+
+## How SRM fits in
+
+* The **Object Manager** maintains objects with associated **security descriptors** (owner, DACL, SACL).
+* When a process requests access (open/create), kernel calls into SRM to evaluate whether the token has requested rights.
+* SRM uses tokens, security descriptors, privileges, and integrity checks to allow/deny operations.
+
+## Things to study / inspect
+
+* Understand **security descriptors**: DACLs (allow/deny ACEs), SACLs (auditing).
+* Understand `SeAccessCheck` flow and how privileges (SE_*) affect checks.
+* Practice: set custom ACL on a file or registry key and see access success/failure from different accounts.
+
+```powershell
+# Example: restrict a file to a specific user
+icacls C:\testfile.txt /grant "DOMAIN\User:(R,W)"
+```
+
+---
+
+# 4 — ObRegisterCallbacks & Object Manager callbacks (used by AV/EDR)
+
+## Purpose
+
+* `ObRegisterCallbacks` is a kernel API that allows a kernel-mode driver to register callbacks that will be invoked on **object handle operations** (create/open/duplicate) for certain object types (processes, threads, desktop, etc.).
+* AV/EDR vendors use these callbacks to intercept or block handle creation/duplication to protect processes like `lsass.exe` or to monitor suspicious inter-process operations.
+
+## High-level flow
+
+1. Driver builds registration structure and calls `ObRegisterCallbacks`.
+2. The callback registration includes **operation registrations** that specify object type (e.g., `PsProcessType`, `PsThreadType`) and the associated pre/post routines.
+3. On an object operation (e.g., `NtOpenProcess`, `NtDuplicateObject`), SRM/Object Manager invokes registered pre-callback(s) before the operation completes.
+4. The pre-callback can inspect parameters, the desired access mask, the source process handle, and **return status** to allow/deny the operation.
+5. Post-callbacks are called after the kernel completes the operation.
+
+## Key kernel structures (conceptual)
+
+* `OB_CALLBACK_REGISTRATION` — top-level registration (driver name, altitude)
+* `OB_OPERATION_REGISTRATION` — per-object-type registration
+* `OB_PRE_OPERATION_INFORMATION` / `OB_POST_OPERATION_INFORMATION` — structures passed to callbacks
+
+> Example (conceptual) pre-callback logic:
+
+* If target process is lsass.exe and requested access includes `PROCESS_VM_READ` from an untrusted process -> return `OB_PREOP_SUCCESS_UNCHANGED` or set `*ReturnStatus = STATUS_ACCESS_DENIED` to block.
+
+## Limitations and security considerations
+
+* Only kernel-mode drivers can register such callbacks (needs proper signing on modern Windows).
+* Drivers must be careful: returning incorrect codes or mishandling can crash the system.
+* Microsoft uses features like PatchGuard and driver signing policy to protect kernel integrity.
+
+## Safe developer exercise (do in lab)
+
+* Study how EDRs register callbacks — read WDK docs on `ObRegisterCallbacks` and examine open-source kernel drivers that demonstrate safe use (only in sandbox).
+* For a safer alternative, in user-mode, use ETW or process creation notifications to log and detect suspicious handle sequences rather than blocking.
+
+---
+
+# Practical snippets & commands
+
+## Get token info in user-mode (sample C++)
+
+```cpp
+#include <windows.h>
+#include <sddl.h> // ConvertSidToStringSid
+
+void PrintTokenInfo(HANDLE hToken) {
+    TOKEN_USER *tu = nullptr;
+    DWORD needed = 0;
+    GetTokenInformation(hToken, TokenUser, nullptr, 0, &needed);
+    tu = (TOKEN_USER*)LocalAlloc(0, needed);
+    if (GetTokenInformation(hToken, TokenUser, tu, needed, &needed)) {
+        LPWSTR sidStr = nullptr;
+        ConvertSidToStringSidW(tu->User.Sid, &sidStr);
+        wprintf(L"User SID: %s\n", sidStr);
+        LocalFree(sidStr);
+    }
+    // TokenIntegrityLevel
+    DWORD len = 0;
+    GetTokenInformation(hToken, TokenIntegrityLevel, nullptr, 0, &len);
+    PTOKEN_MANDATORY_LABEL tml = (PTOKEN_MANDATORY_LABEL)LocalAlloc(0, len);
+    if (GetTokenInformation(hToken, TokenIntegrityLevel, tml, len, &len)) {
+        DWORD il = *GetSidSubAuthority(tml->Label.Sid, (DWORD)(UCHAR)(*GetSidSubAuthorityCount(tml->Label.Sid)-1));
+        wprintf(L"Integrity level RID: %u\n", il);
+    }
+    LocalFree(tu);
+    LocalFree(tml);
+}
+```
+
+## PowerShell: list local users & elevation check
+
+```powershell
+Get-LocalUser
+# Elevated process check
+[Security.Principal.WindowsIdentity]::GetCurrent() | Select Name,AuthenticationType
+# Use Sysinternals Process Explorer to view 'Integrity' and 'Elevated'
+```
+
+## WinDbg useful commands
+
+```
+!process 0 0 <pid>        ; show EPROCESS info
+!handle <handle> f        ; display handle object flags
+!token <tokenaddr>        ; show token (if ext available)
+!vad <address>            ; show VAD info for process address space (extension dependent)
+```
+

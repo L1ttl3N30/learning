@@ -31,3 +31,54 @@
 | 🔥 **He puts the pot on the stove** — assigns it to a burner to be cooked.                                                          | The kernel **registers the process and thread** with the scheduler — gives them CPU time and system resources.                                |
 | 🥕 **He fills the pot with ingredients** — using your ingredient list.                                                              | The kernel + NTDLL **fill the new process’s memory** (PEB, parameters, environment, loaded image) using your inputs.                          |
 | 🧑‍🍳 **The chef starts cooking** — begins the cooking process.                                                                     | The **primary thread starts executing**, running the process’s startup code (like `_NtProcessStartup → mainCRTStartup → main`).               |
+
+
+3. ntdll.dll is user-mode code. It contains the user-side implementations of low-level Windows APIs and the syscall wrappers 
+— tiny functions that set up CPU registers and execute the instruction 
+that causes a controlled transition into kernel mode (on x86/x64 that’s syscall/sysenter/int 2e historically).
+
+So think of ntdll as the user-side gateway: it provides the userland functions that applications call, 
+and those functions invoke the kernel via the syscall mechanism. ntdll itself runs in user mode (Ring 3); the kernel code that actually services the syscall runs in Ring 0.
+
+4.kernel is privileged system software that manages hardware and resources and provides abstractions to user programs. Roles of the kernel include:
+
+Managing CPU scheduling, memory, processes/threads.
+
+Abstracting hardware through drivers (so applications don’t need to know device specifics).
+
+Enforcing security and isolation (access checks, privilege separation).
+
+Providing core services (file systems, networking stacks, IPC).
+
+The kernel itself doesn’t directly toggle every hardware pin — it calls drivers that know how to talk to specific hardware. 
+It exposes higher-level primitives (read, write, DMA setup, interrupts) that drivers use to control hardware. 
+The kernel runs at a privileged CPU mode so it can perform operations user code cannot.
+
+
+
+5. A driver is programmatic code that enables the OS to use hardware (or expose virtual devices)
+- signing a driver is just for knowing who made the driver, not whether is safe to use
+- 64-bit Windows (modern versions) enforces kernel-mode driver signing by default
+- Secure Boot and other platform protections can further restrict loading unsigned or improperly signed kernel modules
+- on older or unsupported Windows versions, unsigned drivers can often be loaded and executed, because driver-signing enforcement was weaker or absent
+
+
+6. ***three layers: API (user-facing) → syscall (mechanism/transition) → system service (kernel implementation
+- ntdll is at api level, edr hooks ntdll to check for malicious intent
+- but you can do syscall without using ntdll, but you need to know syscall id -> hell's gate technique can retrieve syscall id
+
+
+7. Hooking is any technique that intercepts or redirects calls/messages/events so you can observe, modify, or replace behavior. Common kinds:
+
+User-mode function hook: change a function pointer or patch the start of a function (its prologue) so calls end up at your code first. Example: replacing the address in an Import Address Table (IAT) or overwriting the first bytes of a function.
+
+Kernel‐mode hook: intercept kernel callbacks, swap function pointers in kernel structures, or register callback hooks (e.g., process creation callbacks).
+
+API/ABI interception: intercepting calls at the ntdll boundary (the syscall wrappers) so you see syscalls before they go into the kernel.
+
+Unhooking commonly means restoring the original bytes/function pointer 
+so the function behaves as originally intended (remove the interception). 
+In defensive contexts, “unhooking” can also mean restoring a library to a known-good state if it was tampered with.
+
+
+8. windows becomes more safe -> harder for defensive edr too, not just hackers

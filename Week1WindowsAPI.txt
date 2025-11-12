@@ -82,3 +82,11 @@ In defensive contexts, “unhooking” can also mean restoring a library to a kn
 
 
 8. windows becomes more safe -> harder for defensive edr too, not just hackers
+
+9. the flow of a command in windows is:
+- API is called
+- API wraps the data, sends it to the kernel
+- kernel manages memory, access rights,..then talks to the driver
+- basically the kernel says "hey driver, read these sectors from this device"
+- driver sends commands to the firmware
+- the firmware makes the hardwares act

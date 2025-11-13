@@ -1,0 +1,142 @@
+Perfect — here’s a **visual + narrative summary** of the process creation chain in Windows, from when you double-click a program (like `notepad.exe`) in Explorer to when the CPU executes its first user-mode instructions.
+
+---
+
+## 🧭 **Overview: What Happens When You Double-Click notepad.exe**
+
+### ⚙️ **High-Level Flow**
+
+```
+┌────────────────────────────────────────┐
+│ User Mode                              │
+│ (Explorer.exe, Kernel32, NTDLL, etc.)  │
+└────────────────────────────────────────┘
+             │
+             ▼
+   [1] Explorer.exe handles click
+             │
+             ▼
+   [2] ShellExecuteExW → CreateProcessW
+             │
+             ▼
+   [3] NTDLL → NtCreateUserProcess (syscall)
+             │
+             ▼
+┌────────────────────────────────────────┐
+│ Kernel Mode                            │
+│ (Executive, Object Manager, etc.)      │
+└────────────────────────────────────────┘
+             │
+             ▼
+   [4] Process + thread objects created
+             │
+             ▼
+   [5] Image file mapped into memory
+             │
+             ▼
+   [6] PEB, TEB initialized; user loader runs
+             │
+             ▼
+┌────────────────────────────────────────┐
+│ Hardware Execution                     │
+│ (CPU, MMU, Caches, RAM)                │
+└────────────────────────────────────────┘
+             │
+             ▼
+   [7] CPU executes program instructions
+```
+
+---
+
+## 🧩 **Detailed Step-by-Step Summary**
+
+### **1. Explorer.exe (the Shell) initiates the launch**
+
+* When you double-click `notepad.exe`, **Explorer.exe** detects the event.
+* It calls **`ShellExecuteExW`** in `shell32.dll`.
+* Since `.exe` files are executable, it doesn’t perform a file-association lookup — it just prepares a structure (`SHELLEXECUTEINFO`) with the full path to `notepad.exe`.
+* This call eventually leads to `CreateProcessW`.
+
+🧠 *Key concept:* The shell just *requests* process creation — it doesn’t do it directly.
+
+---
+
+### **2. Kernel32.dll calls into NTDLL.dll**
+
+* `ShellExecuteExW` calls **`CreateProcessW`** in `kernel32.dll`.
+* `CreateProcessW` prepares environment data, command-line arguments, and security attributes.
+* Then it calls **`NtCreateUserProcess`** (an internal NT Native API) in `ntdll.dll`.
+
+🧠 *Key concept:* `Kernel32.dll` is a user-mode API layer; the real NT system calls live in `ntdll.dll`.
+
+---
+
+### **3. Transition to Kernel Mode**
+
+* `NtCreateUserProcess` executes a **system call** (`syscall` instruction) that switches the CPU from user mode to kernel mode.
+* Inside the kernel, the **Process Manager** begins the real work, calling internal routines like `PspCreateProcess` and `PspCreateThread`.
+
+🧠 *Key concept:* User mode requests → kernel mode executes.
+
+---
+
+### **4. Kernel creates process and thread objects**
+
+* The kernel allocates and initializes an **EPROCESS** object (the kernel’s representation of a process).
+* It also creates an initial **ETHREAD** object for the main thread.
+* Handles, access tokens, and security descriptors are assigned.
+
+🧠 *Key concept:* Every process and thread in Windows is represented by kernel objects.
+
+---
+
+### **5. The image file is loaded and mapped**
+
+* The **Object Manager** opens the `.exe` file via the **I/O Manager** and the filesystem (NTFS).
+* The **Memory Manager** maps the executable sections (code, data, resources) into the new process’s virtual address space.
+* **PEB (Process Environment Block)** and **TEB (Thread Environment Block)** are allocated inside user space.
+* The kernel then sets up the process’s initial page tables.
+
+🧠 *Key concept:* The process’s virtual memory space is created and populated before execution starts.
+
+---
+
+### **6. User-mode loader runs and initializes**
+
+* Once the kernel finishes setup, control returns to **user mode** at `ntdll!LdrInitializeThunk`.
+* The **user-mode loader** loads required DLLs, applies relocations, resolves imports, and calls each DLL’s `DllMain`.
+* Finally, the loader calls the executable’s entry point (`WinMain`, `main`, or `wWinMain`).
+
+🧠 *Key concept:* The user-mode loader finalizes process startup before the program itself begins.
+
+---
+
+### **7. CPU executes program instructions**
+
+* The process is now fully alive. The **CPU** fetches the next instruction at the program entry point.
+* Virtual addresses are translated by the **MMU** (Memory Management Unit) to physical addresses.
+* Instructions are fetched into **L1 cache**, decoded, executed, and results written back to memory.
+
+🧠 *Key concept:* Hardware executes code in a loop of fetch–decode–execute, with virtual memory managed by Windows and the MMU.
+
+---
+
+## 🧮 **Summary Table**
+
+| Step | Stage       | Key Component                  | Description                                                           |
+| ---- | ----------- | ------------------------------ | --------------------------------------------------------------------- |
+| 1    | User mode   | `Explorer.exe`, `shell32.dll`  | Shell detects click, calls `ShellExecuteExW`.                         |
+| 2    | User mode   | `kernel32.dll`, `ntdll.dll`    | `CreateProcessW` → `NtCreateUserProcess` prepares process parameters. |
+| 3    | Transition  | System call                    | Switch from user to kernel mode.                                      |
+| 4    | Kernel mode | Process Manager                | Creates `EPROCESS`, `ETHREAD`, sets up security.                      |
+| 5    | Kernel mode | Object Manager, Memory Manager | Opens `.exe`, maps it into virtual memory, creates PEB/TEB.                   |
+| 6    | User mode   | `ntdll!LdrInitializeThunk`     | Loads DLLs, sets up runtime environment, calls entry point.           |
+| 7    | Hardware    | CPU, MMU, caches               | Executes instructions, manages virtual/physical memory translation.   |
+
+
+	
+| Concept                     | Handled by                        | Description                                                                            |
+| --------------------------- | --------------------------------- | -------------------------------------------------------------------------------------- |
+| **Virtual memory mapping**  | Kernel (Memory Manager)           | Creates the virtual-to-file mapping (step 5). No physical RAM is used yet.             |
+| **Physical memory loading** | Kernel + Hardware (on page fault) | When accessed, the page is fetched from disk into physical RAM.                        |
+| **Execution**               | Hardware (CPU, MMU)               | Uses virtual addresses; MMU translates them to physical addresses as pages are loaded. |

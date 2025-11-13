@@ -1,0 +1,41 @@
+1. Kernel mode execution vs user-mode execution
+
+Kernel mode can execute instructions — Ring 0 code runs in CPU privilege level 0.
+
+Memory allocated in kernel space (like with ExAllocatePoolWithTag) is:
+
+Accessible to kernel-mode code.
+
+Not directly accessible or executable by user-mode processes (Ring 3).
+
+User-mode memory (via VirtualAlloc):
+
+Allocated in the user-mode process virtual address space.
+
+Can be marked executable (PAGE_EXECUTE_READWRITE).
+
+Malware running in user-mode can jump to it and execute code.
+
+2. Why ExAllocatePoolWithTag alone cannot replace VirtualAlloc
+
+Even if you allocate kernel memory with ExAllocatePoolWithTag, a user-mode process cannot execute code there without crossing privilege boundaries.
+
+CPU enforces Ring 0 vs Ring 3 protection.
+
+Direct execution from kernel memory in user-mode would trigger an access violation.
+
+So, replacing VirtualAlloc in user-mode malware with ExAllocatePoolWithTag won’t work in a normal context.
+
+3. in theory, can we replace VirtualAlloc with ExAllocatePoolWithTag + other apis to run executes from kernel memory?
+
+Yes — but it requires additional steps that are essentially kernel exploits:
+
+Allocate kernel memory: ExAllocatePoolWithTag.
+
+Write code to it from user-mode (requires bypassing privilege checks).
+
+Make it executable from user-mode (requires mapping it into user-mode address space or triggering a syscall that executes it).
+
+This is not simple or standard malware behavior — it’s essentially developing a kernel-mode rootkit.
+
+Most malware sticks to VirtualAlloc because it works in user-mode, is simpler, and avoids crashing the system.

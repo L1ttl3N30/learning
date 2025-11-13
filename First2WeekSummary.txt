@@ -1,16 +1,5 @@
 Excellent — now we’ll integrate the **API layer**, **kernel**, **driver**, and **firmware** levels into the process creation chain so you can see *where* each one fits and *what* role it plays.
 
-You’re already conceptually right:
-
-* **User-mode API layer** = Windows API (`ShellExecuteExW`, `CreateProcessW`, etc.)
-* **Kernel mode** = Windows Executive (Process Manager, Memory Manager, Object Manager, I/O Manager)
-* **Drivers** = Kernel-mode modules handling hardware or filesystem operations
-* **Firmware** = The very lowest level (e.g., UEFI), initializing hardware and exposing services used long before Windows boots — *not* directly involved in launching a process, but it *enabled* the environment Windows runs in.
-
-Let’s lay this all out in one unified picture 👇
-
----
-
 ## 🧩 **The Full Chain: From API to Firmware**
 
 ```

@@ -1,0 +1,223 @@
+							MemoryPoolManager
+A. Goal: 
+- familiarize with VirtualAlloc and CreateThread, page zie and memory alignment,build a free-list allocator, 
+
+B. Steps
+1. allocate 1 or more pages of memory and manage it ourselves
+- pages are kept on the storage
+- a block is a unit of allocation that our custom memory pool hands out (we create a pool and we want it this way)
+	+fixed size blocks ->simple, predictable,fast and hard to break, and no need for metadata, headers or complex algorithms
+- a free list is a linked list that tracks which blocks are currently available to be allocated 	
+	+ when you pop a block from that list, you give it to the user
+	+ when the user frees the memory, you push that block back on to the fron of the free list
+	--> no need for extra memory allocatioin to track free space
+
+**a free block (block A) in memory
++---------------------------------------------+
+| pointer to next free block (blockB) | (unused bytes for block A) |
++---------------------------------------------+
+       ^^^ 8 bytes on 64-bit systems
+
+# code for step 1: 
+constexpr SIZE_T PAGE_SIZE  = 4096;   // Usually 4 KB
+constexpr SIZE_T BLOCK_SIZE = 64;     // Size of each user allocation
+constexpr SIZE_T NUM_BLOCKS = PAGE_SIZE / BLOCK_SIZE;
+
+
+
+2. data structures
+- Need 2 simple structures: memorypool and free block (free node)
+	+the MemoryPool should have: pointer to the VirtualAlloc'ed region, pointer to free-list head, a lock ( a critical section for synchrononizing access)
+	+ free node: 
+		struct FreeNode {	# declare structure name "Freenode"
+		    FreeNode* next;	# pointer to the next Freenode
+		};
+
+
+3.implement initialization
+- call VirtualAlloc
+- Carve memory into block
+- build the free list
+
+Pseudocode:
+pool.memory = VirtualAlloc(...)
+pool.freeList = nullptr
+for each block:
+    cast block to FreeNode*
+    push to freeList
+InitializeCriticalSection(&pool.lock)
+
+
+
+4. Allocate from pool
+- thread-safe allocation:
+EnterCriticalSection
+if pool.freeList == nullptr → out of memory
+Take first free block
+Move freeList to next
+LeaveCriticalSection
+return the block
+
+
+5.Free a block back to pool
+EnterCriticalSection
+push the block back to freeList
+LeaveCriticalSection
+
+
+
+6.Create worker threads
+- Use Createthread to spawn threads that:
+	+ repeatedly allocate a block
+	+ write some data into it
+	+ sleep a bit
+	+ free the block
+
+7. free the pool
+-At the end:
+	VirtualFree(memory, 0, MEM_RELEASE)
+	DeleteCriticalSection
+
+
+
+#include <windows.h>
+#include <iostream>
+
+constexpr SIZE_T PAGE_SIZE  = 4096;
+constexpr SIZE_T BLOCK_SIZE = 64;
+constexpr SIZE_T NUM_BLOCKS = PAGE_SIZE / BLOCK_SIZE;
+
+struct FreeNode {
+    FreeNode* next;
+};
+
+struct MemoryPool {
+    void* memory;             // VirtualAlloc region
+    FreeNode* freeList;       // Head of free list
+    CRITICAL_SECTION lock;    // Thread safety
+};
+
+
+#* is the pointer
+#void* is the pointer to a data of unknown type
+# void* memory is to create a varible called memory which is a pointer to data of unspecified type
+# FreeNode* next is to create a variable called next which is a pointer to a Freenode.
+	#this "next" varible needs to be assigned a value either manually or dynamically
+
+#CRITICAL_SECTION is declared in windows.h
+#CRITICAL_SECTION lock is a windows sync primitive: it ensures only 1 thread at a time can modify the pool's internal structures
+	# it protects updates to freeList, possibly resizing the pool, and any operation that is not thread-safe
+	# faster than a win32 mutex, but still provides mutual exclusion withing a process
+
+MemoryPool pool;
+
+// ------------------- Pool Initialization -------------------		
+
+bool InitializePool() {
+    pool.memory = VirtualAlloc(
+        nullptr,
+        PAGE_SIZE,
+        MEM_RESERVE | MEM_COMMIT,
+        PAGE_READWRITE
+    );
+
+    if (!pool.memory) {
+        std::cerr << "VirtualAlloc failed: " << GetLastError() << "\n";
+        return false;
+    }
+
+    InitializeCriticalSection(&pool.lock);
+
+    pool.freeList = nullptr;
+
+    // Build the free list
+    char* base = static_cast<char*>(pool.memory);
+
+    for (size_t i = 0; i < NUM_BLOCKS; i++) {
+        char* blockAddr = base + i * BLOCK_SIZE;
+        FreeNode* node = reinterpret_cast<FreeNode*>(blockAddr);
+        node->next = pool.freeList;
+        pool.freeList = node;
+    }
+
+    return true;
+}
+
+// ------------------------- Allocate -------------------------
+
+void* PoolAlloc() {
+    EnterCriticalSection(&pool.lock);
+
+    if (!pool.freeList) {
+        LeaveCriticalSection(&pool.lock);
+        return nullptr; // Out of memory
+    }
+
+    FreeNode* node = pool.freeList;
+    pool.freeList = node->next;
+
+    LeaveCriticalSection(&pool.lock);
+    return node;
+}
+
+// --------------------------- Free ---------------------------
+
+void PoolFree(void* ptr) {
+    EnterCriticalSection(&pool.lock);
+
+    FreeNode* node = static_cast<FreeNode*>(ptr);
+    node->next = pool.freeList;
+    pool.freeList = node;
+
+    LeaveCriticalSection(&pool.lock);
+}
+
+// ----------------------- Worker Thread ----------------------
+
+DWORD WINAPI Worker(LPVOID) {
+    for (int i = 0; i < 1000; i++) {
+
+        void* mem = PoolAlloc();
+        if (mem) {
+            // Simulate work
+            memset(mem, 0xAB, BLOCK_SIZE);
+            Sleep(1);
+            PoolFree(mem);
+        } else {
+            std::cout << "Out of memory!\n";
+        }
+    }
+    return 0;
+}
+
+// --------------------------- Main ---------------------------
+
+int main() {
+    if (!InitializePool()) {
+        return 1;
+    }
+
+    // Create threads
+    HANDLE threads[4];
+    for (int i = 0; i < 4; i++) {
+        threads[i] = CreateThread(nullptr, 0, Worker, nullptr, 0, nullptr);
+    }
+
+    // Wait for them
+    WaitForMultipleObjects(4, threads, TRUE, INFINITE);
+
+    // Cleanup
+    for (HANDLE t : threads)
+        CloseHandle(t);
+
+    DeleteCriticalSection(&pool.lock);
+    VirtualFree(pool.memory, 0, MEM_RELEASE);
+
+    std::cout << "All done.\n";
+    return 0;
+}
+
+
+
+
+

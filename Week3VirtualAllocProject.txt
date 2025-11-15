@@ -148,17 +148,29 @@ bool InitializePool() {
     pool.freeList = nullptr;
 
     // Build the free list
-    char* base = static_cast<char*>(pool.memory);
+    char* base = static_cast<char*>(pool.memory); # this is to interpret the raw pool memory address as pointer to bytes, call it base
+# in detail: blockAddr is a char*, pointing to the start of a 64-byte block
+#	     reinterpret_cast<FreeNode*> simply tells the compiler to treat this address as the start of a FreeNode onject and store the address as "node"
+# in a 64bit system, only the first 8 bytes are treated as a pointer, the rest (56 bytes) are unused space for the user
 
     for (size_t i = 0; i < NUM_BLOCKS; i++) {
-        char* blockAddr = base + i * BLOCK_SIZE;
-        FreeNode* node = reinterpret_cast<FreeNode*>(blockAddr);
+        char* blockAddr = base + i * BLOCK_SIZE; 
+        FreeNode* node = reinterpret_cast<FreeNode*>(blockAddr); #this is to treat the first few bytes of the block (blockAddr) as a freeNode 
         node->next = pool.freeList;
+# node-> means access a member inside a struct pointed to by "node"
+# node-> next = pool.freeList; means take the current address of freeList, write it into a new node so the new node points to the old first block (the current freeList)
         pool.freeList = node;
+# this adds the new node to the top of freeList.
+# the pool goes from b1->b64, but the freeList is in reverse order b64->b1
     }
 
     return true;
 }
+
+
+#char* base is to create a variable called base pointing to the address of a char. using char is good here coz the typical size of char is only 1 byte while int takes 4
+# char* blockAddr = base + i * BLOCK_SIZE; is to calculate the bytes after base ->computer the address of the i-th block
+#FreeNode* node = reinterpret_cast<FreeNode*>(blockAddr); is to turn each block into a FreeNode
 
 // ------------------------- Allocate -------------------------
 

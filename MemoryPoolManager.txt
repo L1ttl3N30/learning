@@ -1,0 +1,124 @@
+#include <windows.h>
+#include <iostream>
+
+constexpr SIZE_T PAGE_SIZE  = 4096;
+constexpr SIZE_T BLOCK_SIZE = 64;
+constexpr SIZE_T NUM_BLOCKS = PAGE_SIZE / BLOCK_SIZE;
+
+struct FreeNode {
+    FreeNode* next;
+};
+
+struct MemoryPool {
+    void* memory;             // VirtualAlloc region
+    FreeNode* freeList;       // Head of free list
+    CRITICAL_SECTION lock;    // Thread safety
+};
+
+MemoryPool pool;
+
+// ------------------- Pool Initialization -------------------
+
+bool InitializePool() {
+    pool.memory = VirtualAlloc(
+        nullptr,
+        PAGE_SIZE,
+        MEM_RESERVE | MEM_COMMIT,
+        PAGE_READWRITE
+    );
+
+    if (!pool.memory) {
+        std::cerr << "VirtualAlloc failed: " << GetLastError() << "\n";
+        return false;
+    }
+
+    InitializeCriticalSection(&pool.lock);
+
+    pool.freeList = nullptr;
+
+    // Build the free list
+    char* base = static_cast<char*>(pool.memory);
+
+    for (size_t i = 0; i < NUM_BLOCKS; i++) {
+        char* blockAddr = base + i * BLOCK_SIZE;
+        FreeNode* node = reinterpret_cast<FreeNode*>(blockAddr);
+        node->next = pool.freeList;
+        pool.freeList = node;
+    }
+
+    return true;
+}
+
+// ------------------------- Allocate -------------------------
+
+void* PoolAlloc() {
+    EnterCriticalSection(&pool.lock);
+
+    if (!pool.freeList) {
+        LeaveCriticalSection(&pool.lock);
+        return nullptr; // Out of memory
+    }
+
+    FreeNode* node = pool.freeList;
+    pool.freeList = node->next;
+
+    LeaveCriticalSection(&pool.lock);
+    return node;
+}
+
+// --------------------------- Free ---------------------------
+
+void PoolFree(void* ptr) {
+    EnterCriticalSection(&pool.lock);
+
+    FreeNode* node = static_cast<FreeNode*>(ptr);
+    node->next = pool.freeList;
+    pool.freeList = node;
+
+    LeaveCriticalSection(&pool.lock);
+}
+
+// ----------------------- Worker Thread ----------------------
+
+DWORD WINAPI Worker(LPVOID) {
+    for (int i = 0; i < 1000; i++) {
+
+        void* mem = PoolAlloc();
+        if (mem) {
+            // Simulate work
+            memset(mem, 0xAB, BLOCK_SIZE);
+            Sleep(1);
+            PoolFree(mem);
+        } else {
+            std::cout << "Out of memory!\n";
+        }
+    }
+    return 0;
+}
+
+// --------------------------- Main ---------------------------
+
+int main() {
+    if (!InitializePool()) {
+        return 1;
+    }
+
+    // Create threads
+    HANDLE threads[4];
+    for (int i = 0; i < 4; i++) {
+        threads[i] = CreateThread(nullptr, 0, Worker, nullptr, 0, nullptr);
+    }
+
+    // Wait for them
+    WaitForMultipleObjects(4, threads, TRUE, INFINITE);
+
+    // Cleanup
+    for (HANDLE t : threads)
+        CloseHandle(t);
+
+    DeleteCriticalSection(&pool.lock);
+    VirtualFree(pool.memory, 0, MEM_RELEASE);
+
+    std::cout << "All done.\n";
+    return 0;
+}

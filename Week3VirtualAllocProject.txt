@@ -58,6 +58,12 @@ Move freeList to next
 LeaveCriticalSection
 return the block
 
+#EnterCriticalSection is a protected part of the code where only 1 thread is allowed to execute at a time
+# EnterCriticalSection(&pool.lock); this locks the critical section.
+# If the lock is free, thread enters immediately
+# if another thread is already allocating -> this thread waits
+
+
 
 5.Free a block back to pool
 EnterCriticalSection
@@ -109,6 +115,10 @@ struct MemoryPool {
 	# it protects updates to freeList, possibly resizing the pool, and any operation that is not thread-safe
 	# faster than a win32 mutex, but still provides mutual exclusion withing a process
 
+#EnterCriticalSection(&pool.lock) is to be used every time a thread wants to enter (lock) the critical section (this is used at runtime)
+#InitializeCriticalSection(&pool.lock) is called only once, during program startup
+
+
 MemoryPool pool;
 
 // ------------------- Pool Initialization -------------------		
@@ -120,6 +130,13 @@ bool InitializePool() {
         MEM_RESERVE | MEM_COMMIT,
         PAGE_READWRITE
     );
+#MEM_RESERVE a flag to tell VirtualAlloc to find unsued space and not let other allocation use it
+#MEM_COMMIT is to tell VirtuallAlloc to make this memory space usable
+
+#the flag MEM_RESERVE and MEM_COMMIT are bitwise, meaning they are 1s and 0s. 
+#if you want to use both -> add the value of 1s and 0s (like Union) to get a value for the combined value of BOTH flag
+# if you use (&) instead of (|), you only take the 1s and 0s that are in both flag (like intersection) -> which gives you another value that does not mean using both flags
+
 
     if (!pool.memory) {
         std::cerr << "VirtualAlloc failed: " << GetLastError() << "\n";

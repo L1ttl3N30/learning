@@ -158,7 +158,7 @@ bool InitializePool() {
         FreeNode* node = reinterpret_cast<FreeNode*>(blockAddr); #this is to treat the first few bytes of the block (blockAddr) as a freeNode 
         node->next = pool.freeList;
 # node-> means access a member inside a struct pointed to by "node"
-# node-> next = pool.freeList; means take the current address of freeList, write it into a new node so the new node points to the old first block (the current freeList)
+# node-> next = pool.freeList; means you found the a new node, go to the allocated memory named "next" of this new node, set its value to current freeList address
         pool.freeList = node;
 # this adds the new node to the top of freeList.
 # the pool goes from b1->b64, but the freeList is in reverse order b64->b1

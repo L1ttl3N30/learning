@@ -19,16 +19,16 @@ struct MemoryPool {
 
 #* is the pointer
 #void* is the pointer to a data of unknown type
-# void* memory is to create a varible called memory which is a pointer to data of unspeci>
+# void* memory is to create a varible called memory which is a pointer to data of unspecified type
 # FreeNode* next is to create a variable called next which is a pointer to a Freenode.
         #this "next" varible needs to be assigned a value either manually or dynamically
 
 #CRITICAL_SECTION is declared in windows.h
-#CRITICAL_SECTION lock is a windows sync primitive: it ensures only 1 thread at a time ca>
-        # it protects updates to freeList, possibly resizing the pool, and any operation >
+#CRITICAL_SECTION lock is a windows sync primitive: it ensures only 1 thread at a time can use the allocated memory
+        # it protects updates to freeList, possibly resizing the pool, and any operations that are thread safe
         # faster than a win32 mutex, but still provides mutual exclusion withing a process
 
-#EnterCriticalSection(&pool.lock) is to be used every time a thread wants to enter (lock)>
+#EnterCriticalSection(&pool.lock) is to be used every time a thread wants to enter (lock) the CriticalSecion
 #InitializeCriticalSection(&pool.lock) is called only once, during program startup
 
 
@@ -46,12 +46,12 @@ bool InitializePool() {
         MEM_RESERVE | MEM_COMMIT,
         PAGE_READWRITE
     );
-#MEM_RESERVE a flag to tell VirtualAlloc to find unsued space and not let other allocatio>
+#MEM_RESERVE a flag to tell VirtualAlloc to find unsued space and not let other allocation use it
 #MEM_COMMIT is to tell VirtuallAlloc to make this memory space usable
 
 #the flag MEM_RESERVE and MEM_COMMIT are bitwise, meaning they are 1s and 0s. 
-#if you want to use both -> add the value of 1s and 0s (like Union) to get a value for th>
-# if you use (&) instead of (|), you only take the 1s and 0s that are in both flag (like >
+#if you want to use both -> add the value of 1s and 0s (like Union) to get a value for the combination of both MEM_RESERVE and MEM_COMMIT
+# if you use (&) instead of (|), you only take the 1s and 0s that are in both flag (like intersection) -> might become null -> no flag
 
 
 
@@ -79,15 +79,17 @@ bool InitializePool() {
 }
 
 # in detail: blockAddr is a char*, pointing to the start of a 64-byte block
-#            reinterpret_cast<FreeNode*> simply tells the compiler to treat this address >
-# in a 64bit system, only the first 8 bytes are treated as a pointer, the rest (56 bytes)>
+#            reinterpret_cast<FreeNode*> simply tells the compiler to treat this address as a pointer and store it as "node" which is the pointer to the new found node
+# in a 64bit system, only the first 8 bytes are treated as a pointer, the rest (56 bytes) is for the user to use
 
 # node-> means access a member inside a struct pointed to by "node"
-# node-> next = pool.freeList; means take the current address of freeList, write it into >
- 
-#char* base is to create a variable called base pointing to the address of a char. using >
-# char* blockAddr = base + i * BLOCK_SIZE; is to calculate the bytes after base ->compute>
-#FreeNode* node = reinterpret_cast<FreeNode*>(blockAddr); is to turn each block into a Fr>
+# node-> next = pool.freeList; means go inside the new found node, go to the allocated memory "next" and assign it the value of pool.freeList
+# so basically, till now, the code iterates to the next block, stores its address as "node", assigns the "next" member(inside this node) the address of current freeList 
+# then pool.freeList =node; is to make this new node become the head of the freeList 
+#--> the freeList list will be in reverse order of the block list
+
+#char* base is to create a variable called base pointing to the address of a char. using char gives the precise location coz char is 1 byte
+#char* allows byte-wise pointer arithmetic, meaning adding 1 to a char* moves the pointer by exactly 1 byte
 
 
 

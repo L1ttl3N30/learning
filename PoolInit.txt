@@ -1,0 +1,47 @@
+#include <windows.h>
+#include <iostream>
+
+constexpr SIZE_T PAGE_SIZE = 4096;
+constexpr SIZE_T BLOCK_SIZE = 64;
+constexpr SIZE_T NUM_BLOCKs = PAGE_SIZE/BLOCK/SIZE;
+
+struct FreeNode {
+	FreeNode* next;
+}
+
+struct MemoryPool {
+	void* memory;
+	FreeNode* freeList;
+	CRITICAL_SECTION lock;
+
+}
+
+
+MemoryPool pool;
+bool InitializePool(){
+	pool.memory = VirtualAlloc(
+		nullptr,
+		PAGE_SIZE,
+		MEM_RESERVE | MEM_COMMIT;
+		PAGE_READWRITE;
+	);
+
+
+	if (!pool.memory){
+		std:cerr << "VirtualAlloc failed " << GetLastError() << "\n";
+		return false;
+	}
+
+	InitializeCriticalSectin(&pool.lock);
+	pool.freeList = nullptr;
+	
+	char* base = static_cast<char*>(pool.memory);
+	for (size_t i=0; i<NUM_BLOCKS; i++) {
+	char* blockAddr = base + i *BLOCK_SIZE;
+	FreeNode* node = reinterpret_cast<FreeNode*>(blockAddr);
+	node-> next = pool.freeList;
+	pool.freeList = node;
+	}
+	return true;
+
+}

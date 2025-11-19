@@ -1,0 +1,18 @@
+setting up tails (live) is as easy as it gets
+same thing with kali live.
+the problem starts with persistence
+#command
+wipefs -a /dev/sdX
+sudo fdisk /dev/sdX <<< $(printf "p\nn\np\n\n\n\np\nw") #create a new partition from empty sapce
+mkfs.ext4 -L persistence /dev/sdXN
+sudo mkdir -pv /mnt/my_usb
+sudo mount -v /dev/sdXN /mnt/my_usb
+#getting stuck here -> superblock has an invalid journal
+#spent 8 hours herew wiping and remaking usb live 
+# maybe the problem happens when creating new partition with fdisk, maybe the partition was not properly unmounted
+
+sudo e2fsck -l badsectors.txt /dev/sdXN #to check for bad sectors (dont run when mounted)
+echo "/ union" | sudo tee /mnt/my_usb/persistence.conf #make file 
+umount -v /dev/sdXN
+reboot
+

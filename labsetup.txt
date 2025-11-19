@@ -16,3 +16,29 @@ echo "/ union" | sudo tee /mnt/my_usb/persistence.conf #make file
 umount -v /dev/sdXN
 reboot
 
+day 2 of continuing this
+- trying to check for bad sectors
+	e2fsck -l badsectors.txt /dev/sda3
+getting error: superblock has in invalid journal
+		reading_bad_blocks_file: nos such for or directory
+
+- trying to find if that file exist
+	find / -name badsectors.txt 2>/dev/null
+getting nothing
+
+-trying to build that file
+	badblocks -sv /dev/sda3 > badsectors.txt
+getting pass completed, 0 bad blocks found
+
+- rechecking with e2fck still gets superblock has an invalid journal
+
+- just remembered when using rufus: set the size for persistence to be 0
+- 2 options now: rebuild with 
+	sudo dd if=kali-linux-2025.3-live-amd64.iso of=/dev/sdX conv=fsync bs=4M status=progress
+	or again on windows
+
+
+-before that: tried tune2fs -j /dev/sda3 --> block bitmap mismatch
+-> sudo e2fsck -fy /dev/sda3 #force repair everything
+- still getting the same error: suspect hardware problem
+-> sudo badblocks -wsv /dev/sda (this is gonna take a few hours again)

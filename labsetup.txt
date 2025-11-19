@@ -42,3 +42,6 @@ getting pass completed, 0 bad blocks found
 -> sudo e2fsck -fy /dev/sda3 #force repair everything
 - still getting the same error: suspect hardware problem
 -> sudo badblocks -wsv /dev/sda (this is gonna take a few hours again)
+
+has been more than a day. gonna try one last time with rufus + room for resistence
+if it does not work -> another usb

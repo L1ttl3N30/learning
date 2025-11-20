@@ -45,3 +45,28 @@ getting pass completed, 0 bad blocks found
 
 has been more than a day. gonna try one last time with rufus + room for resistence
 if it does not work -> another usb
+
+
+***this is the end result***
+1. can erase the usb and remake the live usb  but run extremely slow and get stuck all the time
+2. check with e2fsck.ext4, gets mismatch in inode
+-> conclusion: fake and bad usb
+3. bought new kingston 64gb usb and building now
+- umount the sub before erasing it
+- sudo dd if=/dev/zero of=/dev/sda bs=4M status=progress
+sudo sync
+- wget https://github.com/balena-io/etcher/releases/download/v1.22.20/balenaEtcher-1.22.20-x64.AppImage
+chmod +x balenaEtcher-1.22.20-x64.AppImage
+- ./balenaEtcher-1.22.20-x64.AppImage
+- sudo parted /dev/sda --script mkpart primary ext4 8GB 100%
+sudo mkfs.ext4 -L persistence /dev/sda2
+- sudo mount /dev/sda2 /mnt
+echo "/ union" | sudo tee /mnt/persistence.conf
+sudo umount /mnt
+
+test usb reliability:
+sudo apt install f3
+sudo mount /dev/sda2 /mnt
+sudo f3write /mnt
+sudo f3read /mnt
+

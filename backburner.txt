@@ -1,0 +1,1 @@
+1. write automation script: run WinDbg → print logs to file → use AI to analyze logs → detect suspicious activity

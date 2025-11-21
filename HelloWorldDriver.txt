@@ -1,0 +1,162 @@
+Steps to build:
+1. install VS2022, WDK 10
+2. New Project -> Kernel Mode Driver (empty) or WDM Driver #this will create a sys file automatically
+3. write code
+4. x64 config
+5. build -> build solution #VS compiles everything into something.sys
+
+
+The flow of the driver is:
+1.DriverEntry runs first (like main())
+	- register dispatch functions
+	- set driverUnload
+	- Initialize anything it needs
+	#this is like creating a program called DriverEntry and DriverEntry sets callbacks(like properties) of the driver object
+
+2. the OS calls dispatch functions, when events happen
+3. driver's functions do not run automatically -> windows calls them, meaning they only run when:
+	a program accesses the driver
+	the system loads/unloads the driver
+	something triggers an IRP
+
+
+
+
+
+#include <ntddk.h>
+
+// Forward declarations
+DRIVER_INITIALIZE DriverEntry;
+DRIVER_UNLOAD     DriverUnload;
+_Dispatch_type_(IRP_MJ_CREATE)  
+DRIVER_DISPATCH DispatchCreate;
+_Dispatch_type_(IRP_MJ_CLOSE)
+DRIVER_DISPATCH DispatchClose;
+_Dispatch_type_(IRP_MJ_DEVICE_CONTROL)
+DRIVER_DISPATCH DispatchIoctl;
+
+
+// -------------------------
+// Driver Entry
+// -------------------------
+NTSTATUS DriverEntry(
+    PDRIVER_OBJECT DriverObject,
+    PUNICODE_STRING RegistryPath
+)
+{
+    UNREFERENCED_PARAMETER(RegistryPath);
+
+    KdPrint(("HelloWorldDriver: DriverEntry called\n"));
+
+    // Set unload routine
+    DriverObject->DriverUnload = DriverUnload;
+
+    // Set dispatch routines
+    DriverObject->MajorFunction[IRP_MJ_CREATE] = DispatchCreate;
+    DriverObject->MajorFunction[IRP_MJ_CLOSE] = DispatchClose;
+    DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = DispatchIoctl;
+
+    KdPrint(("HelloWorldDriver: DriverEntry completed successfully\n"));
+
+    return STATUS_SUCCESS;
+}
+
+
+// -------------------------
+// Unload routine
+// -------------------------
+VOID DriverUnload(
+    PDRIVER_OBJECT DriverObject
+)
+{
+    UNREFERENCED_PARAMETER(DriverObject);
+
+    KdPrint(("HelloWorldDriver: Unloading driver\n"));
+}
+
+
+// -------------------------
+// IRP_MJ_CREATE handler
+// -------------------------
+NTSTATUS DispatchCreate(
+    PDEVICE_OBJECT DeviceObject,
+    PIRP Irp
+)
+{
+    UNREFERENCED_PARAMETER(DeviceObject);
+
+    KdPrint(("HelloWorldDriver: IRP_MJ_CREATE received\n"));
+
+    Irp->IoStatus.Status = STATUS_SUCCESS;
+    Irp->IoStatus.Information = 0;
+
+    IoCompleteRequest(Irp, IO_NO_INCREMENT);
+    return STATUS_SUCCESS;
+}
+
+
+// -------------------------
+// IRP_MJ_CLOSE handler
+// -------------------------
+NTSTATUS DispatchClose(
+    PDEVICE_OBJECT DeviceObject,
+    PIRP Irp
+)
+{
+    UNREFERENCED_PARAMETER(DeviceObject);
+
+    KdPrint(("HelloWorldDriver: IRP_MJ_CLOSE received\n"));
+
+    Irp->IoStatus.Status = STATUS_SUCCESS;
+    Irp->IoStatus.Information = 0;
+
+    IoCompleteRequest(Irp, IO_NO_INCREMENT);
+    return STATUS_SUCCESS;
+}
+
+
+// -------------------------
+// IRP_MJ_DEVICE_CONTROL handler
+// -------------------------
+NTSTATUS DispatchIoctl(
+    PDEVICE_OBJECT DeviceObject,
+    PIRP Irp
+)
+{
+    UNREFERENCED_PARAMETER(DeviceObject);
+
+    KdPrint(("HelloWorldDriver: IRP_MJ_DEVICE_CONTROL received\n"));
+
+    Irp->IoStatus.Status = STATUS_SUCCESS;
+    Irp->IoStatus.Information = 0;
+
+    IoCompleteRequest(Irp, IO_NO_INCREMENT);
+    return STATUS_SUCCESS;
+}
+
+
+
+
+
+###test###
+In cmd:
+1. bcdebit /set testsigning on
+	-> reboot
+	# this allows unsigned drivers to run for testing
+
+2. load the driver manually:
+	sc create HelloWorld type=kernel binPath=C:\Driver\helloworld.sys
+	sc start HellowWorld
+	# windbg can view memory, IRPs, threads....and capture detialed logs
+in Debugview->enable:
+- Capture Kernel
+- capture Global Win32
+should see:
+	+HelloWorld: Driver Entry called
+	+HelloWorld: IRP MJ CREATE received 
+	+HelloWorld: IRP MJ Close received 
+
+
+
+
+

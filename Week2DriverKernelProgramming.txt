@@ -170,11 +170,6 @@ I’ll cover each service/component: role, storage, relevant APIs, and safe dete
 * When a process requests access (open/create), kernel calls into SRM to evaluate whether the token has requested rights.
 * SRM uses tokens, security descriptors, privileges, and integrity checks to allow/deny operations.
 
-## Things to study / inspect
-
-* Understand **security descriptors**: DACLs (allow/deny ACEs), SACLs (auditing).
-* Understand `SeAccessCheck` flow and how privileges (SE_*) affect checks.
-* Practice: set custom ACL on a file or registry key and see access success/failure from different accounts.
 
 ```powershell
 # Example: restrict a file to a specific user
@@ -214,12 +209,6 @@ icacls C:\testfile.txt /grant "DOMAIN\User:(R,W)"
 * Drivers must be careful: returning incorrect codes or mishandling can crash the system.
 * Microsoft uses features like PatchGuard and driver signing policy to protect kernel integrity.
 
-## Safe developer exercise (do in lab)
-
-* Study how EDRs register callbacks — read WDK docs on `ObRegisterCallbacks` and examine open-source kernel drivers that demonstrate safe use (only in sandbox).
-* For a safer alternative, in user-mode, use ETW or process creation notifications to log and detect suspicious handle sequences rather than blocking.
-
----
 
 # Practical snippets & commands
 

@@ -1,0 +1,35 @@
+Windwos Driver Model drivers are kernel-mode drivers built around the concept of IRPs (I/O Request Packets) and a defined entry/dispatch system
+
+DriverEntry is hte kernel driver's main entry point like (main() in apps)
+it is responsible for:
+	+Setting dispatch routines
+	+ Creating device objects
+	+ Creating symbolic links
+	+ Initializing driver-wide resources
+
+IRPs are data structures used by Windows to communicate with drivers
+Common IRP Major Functions:
+	+ IRP MJ Create (open handle)
+	+IRP MJ_CLOSE
+	+IRP MJ_READ
+	+IRP MJ_WRITE
+	+IRP MJ DEVICE CONTROL (IOCTLS)
+	+ IRP MJ CLEANUP
+
+1. DbgPrint() / KdPrint() is to Print logs to kernel debugger / DebugView
+166 these are are part of Windows kernel-mode API, which is written in C or C++ -> you can program in any language to call normal windows apis but C and C++ will be faster coz they compile directly to native code
+*****BUT Only a very small set of languages can call Windows kernel APIs, and the only practical ones are C and C++
+
+2.⭐ User Mode APIs
+	Can be called from many languages
+	C/C++ are fastest, but others work fine
+	Languages run in user mode and are safe
+  ⭐ Kernel Mode APIs
+	Only callable by code running in kernel mode
+	Only drivers and the kernel itself use these
+	Practically only C/C++/Rust/ASM can be used
+	Dangerous and highly restricted
+
+3.a sys file is a kernel driver -> Windows must load it through kernel loader  -> sys file is loaded into kernel's address space -> Windows calls DriverEntry -> Driver now runs kernel mode
+
+4. Syscalls are 1000x slower because they switch the CPU from user mode to kernel mode, which is expensive

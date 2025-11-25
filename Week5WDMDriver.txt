@@ -1,0 +1,282 @@
+1. Project structure
+MyDeviceDriver\
+│
+├── MyDeviceDriver.vcxproj
+├── driver.h
+├── driver.c
+├── dispatch.c
+|── user_test.c
+└── inf\MyDeviceDriver.inf
+
+2. Steps
+- in Vs, install WDK
+- create new project
+- add .c and .h files
+- set configuration to Win10Debug | x64
+- build-> produces new_project.sys
+
+*run
+cmd(admin): bcdedit /set testsigning on
+reboot
+
+*install driver
+pnputil /add-driver MyDeviceDriver.inf /install
+
+*start driver
+sc start MyDeviceDriver
+*check device exits
+dir \\.\MyDevice
+
+
+*debug
+open DebugView64.exe -> capture kernel -> capture Win32 -> should see DriverEntry: MyDeviceDriver loading...IOCTL_MY_ECHO called (len=64)"
+
+*test from user-mode
+compile user_text.c and run -> should see Kernel responded (64 bytes): Hello Kernel Driver!
+
+
+3.
+A. driver.h
+#pragma once
+#include <ntddk.h>
+
+#define DEVICE_NAME      L"\\Device\\MyDevice"
+#define SYMLINK_NAME     L"\\DosDevices\\MyDevice"
+
+// Our custom IOCTL
+#define IOCTL_MY_ECHO CTL_CODE( \
+        FILE_DEVICE_UNKNOWN, \
+        0x800, \
+        METHOD_BUFFERED, \ 
+# if METHOD_NEITHER is used, this can be a point of vulnerability 
+        FILE_ANY_ACCESS )
+
+DRIVER_INITIALIZE DriverEntry;
+DRIVER_UNLOAD DriverUnload;
+
+_Dispatch_type_(IRP_MJ_CREATE)
+DRIVER_DISPATCH DispatchCreateClose;
+
+_Dispatch_type_(IRP_MJ_CLOSE)
+DRIVER_DISPATCH DispatchCreateClose;
+
+_Dispatch_type_(IRP_MJ_DEVICE_CONTROL)
+DRIVER_DISPATCH DispatchIoctl;
+
+
+
+
+
+B. driver.c
+#include "driver.h"
+
+NTSTATUS
+DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
+{
+    UNREFERENCED_PARAMETER(RegistryPath);
+    KdPrint(("DriverEntry: MyDeviceDriver loading...\n"));
+
+    // Set dispatch routines
+    DriverObject->DriverUnload = DriverUnload;
+    DriverObject->MajorFunction[IRP_MJ_CREATE] = DispatchCreateClose;
+    DriverObject->MajorFunction[IRP_MJ_CLOSE]  = DispatchCreateClose;
+    DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = DispatchIoctl;
+
+    // Create device
+    UNICODE_STRING devName = RTL_CONSTANT_STRING(DEVICE_NAME);
+    PDEVICE_OBJECT deviceObj = NULL;
+
+    NTSTATUS status = IoCreateDevice(
+        DriverObject,
+        0,
+        &devName,
+        FILE_DEVICE_UNKNOWN,
+        0,
+        FALSE,
+        &deviceObj
+    );
+
+    if (!NT_SUCCESS(status)) {
+        KdPrint(("IoCreateDevice failed: 0x%X\n", status));
+        return status;
+    }
+
+    // Create symbolic link
+    UNICODE_STRING symName = RTL_CONSTANT_STRING(SYMLINK_NAME);
+    status = IoCreateSymbolicLink(&symName, &devName);
+
+    if (!NT_SUCCESS(status)) {
+        KdPrint(("IoCreateSymbolicLink failed: 0x%X\n", status));
+        IoDeleteDevice(deviceObj);
+        return status;
+    }
+
+    KdPrint(("Driver loaded successfully\n"));
+    return STATUS_SUCCESS;
+}
+
+VOID
+DriverUnload(PDRIVER_OBJECT DriverObject)
+{
+    KdPrint(("DriverUnload: Unloading driver...\n"));
+
+    UNICODE_STRING symName = RTL_CONSTANT_STRING(SYMLINK_NAME);
+    IoDeleteSymbolicLink(&symName);
+
+    IoDeleteDevice(DriverObject->DeviceObject);
+
+    KdPrint(("Driver unloaded\n"));
+}
+
+
+C.dispatch.c
+#include "driver.h"
+
+NTSTATUS
+DispatchCreateClose(PDEVICE_OBJECT DeviceObject, PIRP Irp)
+{
+    UNREFERENCED_PARAMETER(DeviceObject);
+
+    KdPrint(("DispatchCreateClose called\n"));
+
+    Irp->IoStatus.Status = STATUS_SUCCESS;
+    Irp->IoStatus.Information = 0;
+    IoCompleteRequest(Irp, IO_NO_INCREMENT);
+
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS
+DispatchIoctl(PDEVICE_OBJECT DeviceObject, PIRP Irp)
+{
+    UNREFERENCED_PARAMETER(DeviceObject);
+
+    PIO_STACK_LOCATION stack = IoGetCurrentIrpStackLocation(Irp);
+    ULONG ioctl = stack->Parameters.DeviceIoControl.IoControlCode;
+
+    ULONG inLen = stack->Parameters.DeviceIoControl.InputBufferLength;
+    ULONG outLen = stack->Parameters.DeviceIoControl.OutputBufferLength;
+
+    PVOID buffer = Irp->AssociatedIrp.SystemBuffer;
+    NTSTATUS status = STATUS_SUCCESS;
+
+    switch (ioctl)
+    {
+        case IOCTL_MY_ECHO:
+            KdPrint(("IOCTL_MY_ECHO called (len=%lu)\n", inLen));
+
+            if (inLen > 0 && outLen >= inLen) {
+                // Echo back exactly what was sent
+                Irp->IoStatus.Information = inLen;
+            }
+            else {
+                status = STATUS_BUFFER_TOO_SMALL;
+            }
+            break;
+
+        default:
+            KdPrint(("Unknown IOCTL: 0x%X\n", ioctl));
+            status = STATUS_INVALID_DEVICE_REQUEST;
+            break;
+    }
+
+    Irp->IoStatus.Status = status;
+    IoCompleteRequest(Irp, IO_NO_INCREMENT);
+    return status;
+}
+
+
+D. user_test.c
+#include <Windows.h>
+#include <stdio.h>
+
+#define IOCTL_MY_ECHO CTL_CODE(FILE_DEVICE_UNKNOWN, 0x800, METHOD_BUFFERED, FILE_ANY_ACCESS)
+
+int main()
+{
+    HANDLE h = CreateFileA("\\\\.\\MyDevice",
+        GENERIC_READ | GENERIC_WRITE,
+        0, NULL, OPEN_EXISTING, 0, NULL);
+
+    if (h == INVALID_HANDLE_VALUE) {
+        printf("Error opening device: %lu\n", GetLastError());
+        return 1;
+    }
+
+    char inbuf[64] = "Hello Kernel Driver!";
+    char outbuf[64] = { 0 };
+    DWORD returned = 0;
+
+    BOOL ok = DeviceIoControl(
+        h,
+        IOCTL_MY_ECHO,
+        inbuf, sizeof(inbuf),
+        outbuf, sizeof(outbuf),
+        &returned,
+        NULL);
+#if METHOD_NEITHER were used, the inbuff will be changed into smt (void*)0x12345678 which is a pointer that anyone can choose (a pointer in memory they own, invalid mem, kernel mem (illegal) or a pointer that can be changed after validation)
+#--> dangerous --> many vulnerabilities use this
+#if METHOD_BUFFERED is used, user input the buffer -> os copies it into a safe kernel buffer -> driver never sees raw user pointer, cannot change the kernel buffer after the call begins -> safe
+	#if a bad pointer is input, IO manager calls memcp to copy it from user buffer to kernel buffer, the copy will fail here coz the os detects this when user mode is transitioned to kernel mode
+	# -> windows returns an error before the driver's DispatchDeviceControl is called
+# Drivers dont see raw raw user buffer, drivers only see safe kernel buffer 
+    if (!ok) {
+        printf("DeviceIoControl failed: %lu\n", GetLastError());
+    }
+    else {
+        printf("Kernel responded (%lu bytes): %s\n", returned, outbuf);
+    }
+
+    CloseHandle(h);
+    return 0;
+}
+
+
+E. Inf file (MyDeviceDriver.inf)
+[Version]
+Signature="$WINDOWS NT$"
+Class=Sample
+ClassGuid={78A1C341-4539-11D3-B88D-00C04FAD5171}
+Provider=%ProviderName%
+DriverVer=01/01/2025,1.0.0.0
+
+[DestinationDirs]
+DefaultDestDir = 12
+
+[Manufacturer]
+%ProviderName%=Standard,NTamd64
+
+[Standard.NTamd64]
+%DeviceName%=InstallSection, Root\MyDeviceDriver
+
+[InstallSection]
+CopyFiles = @MyDeviceDriver.sys
+
+[InstallSection.Services]
+AddService = MyDeviceDriver, 0x00000002, Service_Inst
+
+[Service_Inst]
+DisplayName    = %ServiceName%
+ServiceType    = 1
+StartType      = 3
+ErrorControl   = 1
+ServiceBinary  = %12%\MyDeviceDriver.sys
+
+[Strings]
+ProviderName="MyCompany"
+DeviceName="MyDeviceDriver"
+ServiceName="My Device Driver"
+
+
+
+
+***general structure of a driver***
+| File            | Purpose                                                                                                                |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| **driver.h**    | Public header shared across the driver’s `.c` files; contains IOCTL definitions, prototypes, global structs, constants |
+| **driver.c**    | Contains `DriverEntry`, `DriverUnload`, and driver initialization (device object, symbolic link, driver object setup)  |
+| **dispatch.c**  | Contains IRP dispatch routines: `IRP_MJ_CREATE`, `IRP_MJ_CLOSE`, `IRP_MJ_DEVICE_CONTROL`, etc.                         |
+| **user_test.c** | A standalone user-mode program that uses `CreateFile` + `DeviceIoControl` to talk to your driver                       |
+| **.inf file**   | Used to install the driver under Windows, creating service entries and registering the .sys binary                     |
+
+***apps that require performance, saving costs and backward compatibility would usually use METHOD_NEITHER --> POINT OF VULNERABILITY***	

@@ -1,0 +1,37 @@
+1. device objects
+- is the kernel's representation of the driver's "device" - a virtual kernel object
+- user-mode program interact with the drivers though this device object using CreateFile, DeivceIoControl
+- when a driver loads:
+	+ a device object is created
+	+ a symbolic link is created so user-mode can open it
+
+- a symboliclink is a user-mode-visible name like \\.\MyDriver
+	it's like /dev/<mydevice> in ubuntu
+	it allows user-mode to open the driver with CreateFile
+
+2. IOCTL (i/o control codes)
+- IOCTLs are commands that user-mode sends to the driver
+- a 32-bit IOCTL encodes:
+	+device type
+	+ Function number
+	+ Method for passing buffers
+	+ Required access rights
+- communication between user and kernel occurs via:
+	+ METHOD_BUFFERED (beginners-safest/easiest)
+	+ METHOD_IN_DIRECT/OUT_DIRECT (DMA-friendly)
+	+ METHOD_NEITHER (dangerous, requires strict validation)
+
+- User<->Driver flow
+	+ User mode: DeviceIoControl(handle, IOCTL_X, input,inSize,output,outSize...)
+	+ Driver receives an IRP with a parameter IOCTL_X
+	+ Driver dispatches
+	+ inside your code: 
+			switch (IOCTL_X)
+			{
+			    case IOCTL_1: call Handler1();
+			    case IOCTL_2: call Handler2();
+			    ...
+			}
+	+ Driver executes handler
+	+ Driver completes IRP
+	+ User receives output

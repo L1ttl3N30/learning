@@ -1,0 +1,43 @@
+1. a number of device controllers connected through a common bus that provides access to shared memory
+ -> meaning 1 infected device can lead to the whole system compromising
+ - a device controller has a set of registers
+ - registers are like parameters of a function
+ - the controllers cannot write arbitrary code to kernel memory without setup  
+2. the working of an io operation
+ - to start an i/o operation, the device driver loads the appropriate registers withing the device controllers
+ - the controller examines the content of these registers to determine what actions to take
+ - the controller starts to transfer data from the device to its local buffer
+ - then the controller informs the device drivers that the transfer is complete through an interrupt
+ - the driver now returns control to the os
+
+
+**simple version:
+ - cpu issues an i/o request through a device driver
+ - drivers write commands + addresses into device registers
+ - device transfers data through PIO (CPU reads/writes data to registers manually) or DMA
+ - when finished, the devices raises an interrupt
+ - Os interrupt handler wakes the waiting process 
+
+3. this can cause a lot of overhead when transfering lots of data due to the cpu keeps getting interrupted
+-> DMA (direct memory access) which skips the cpu entirely after setting up buffers, pointers and counters
+
+
+4. keys points for vulnerability:
+- PCIE can request DMA access, meaning they can read/write system memory directly -> fake PCIE
+- thunderbolt/usb-c alt-mode : very dangerous -> DMA capable -> thunderbolt attackes are wellknown
+==> if these are infected, hackers can inject code to kernel memory, modify page tables, disable security controls, dump ram
+
+5. known ventors:
+ - PCIE DMA implants
+ - thunderbolt attackes
+ - FireWire attackes
+ - Malicious DMA-capable FPGA hardware
+
+6. protection:
+ - IOMMU (intel VT-d, AMD-Vi) -> isolates memory regions
+ - kernel DMA protection in windows 10+
+ - disable thunderbolt when not needed:
+    + bios -> anything with thunderbolt should be disabled
+            -> external ports/ pcie tunneling -> disabled
+            -> dma protection -> on
+            -> security level: 0 means none, sl2 is secure and disable ports (optional)
